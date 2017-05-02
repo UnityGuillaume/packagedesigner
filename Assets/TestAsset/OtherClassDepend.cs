@@ -2,14 +2,11 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class CompilingScriptTest : MonoBehaviour
-{
-    OtherClassDepend special;
-
+public class OtherClassDepend : MonoBehaviour {
 
 	// Use this for initialization
 	void Start () {
-        special.BroadcastMessage("Test");
+		
 	}
 	
 	// Update is called once per frame

@@ -9,6 +9,8 @@ using System.Text;
 
 public class PackageDesigner : EditorWindow
 {
+    public List<string> nonCompilingFiles { get { return m_NonCompilingScriptFiles; } }
+
     AssetPackage[] m_AssetPackageList;
     Vector2 m_PackageListScrollPos;
 
@@ -16,6 +18,10 @@ public class PackageDesigner : EditorWindow
 
     DependencyTreeView m_DepTreeView;
     TreeViewState m_tvstate;
+
+    string m_PackageCompileError;
+    List<string> m_NonCompilingScriptFiles = new List<string>();
+    Vector2 m_ErroDisplayScroll;
 
     [MenuItem("Content/PackageDesigner")]
     static void Open()
@@ -33,6 +39,7 @@ public class PackageDesigner : EditorWindow
         GetAllPackageList();
         m_tvstate = new TreeViewState();
         m_DepTreeView = new DependencyTreeView(m_tvstate);
+        m_DepTreeView.designer = this;
 
         Undo.undoRedoPerformed += UndoPerformed;
 
@@ -123,6 +130,13 @@ public class PackageDesigner : EditorWindow
         EditorGUILayout.BeginVertical();
         EditorGUILayout.BeginVertical();
 
+        if (m_PackageCompileError != "")
+        {
+            m_ErroDisplayScroll = EditorGUILayout.BeginScrollView(m_ErroDisplayScroll, GUILayout.Height(64));
+            EditorGUILayout.HelpBox(m_PackageCompileError, MessageType.Error);
+            EditorGUILayout.EndScrollView();
+        }
+
         EditorGUILayout.BeginHorizontal();
         m_CurrentlyEdited.packageName = EditorGUILayout.DelayedTextField("Package Name", m_CurrentlyEdited.packageName);
         if(GUILayout.Button("Export ..."))
@@ -191,12 +205,11 @@ public class PackageDesigner : EditorWindow
 
     void PopulateTreeview()
     {
+        m_PackageCompileError = "";
+        m_ErroDisplayScroll = Vector2.zero;
+
         if (m_CurrentlyEdited == null)
             return;
-
-        m_DepTreeView.assetPackage = m_CurrentlyEdited;
-        m_DepTreeView.Reload();
-        m_DepTreeView.ExpandAll();
 
         string[] files = new string[0];
         string[] depPath = m_CurrentlyEdited.dependencies;
@@ -212,6 +225,11 @@ public class PackageDesigner : EditorWindow
         {
             CheckCanCompile(files);
         }
+
+
+        m_DepTreeView.assetPackage = m_CurrentlyEdited;
+        m_DepTreeView.Reload();
+        m_DepTreeView.ExpandAll();
     }
 
     void GetAllPackageList()
@@ -227,6 +245,7 @@ public class PackageDesigner : EditorWindow
 
     void CheckCanCompile(string[] files)
     {
+        m_NonCompilingScriptFiles.Clear();
         CSharpCodeProvider provider = new CSharpCodeProvider();
         CompilerParameters parameters = new CompilerParameters();
 
@@ -249,13 +268,11 @@ public class PackageDesigner : EditorWindow
             foreach (CompilerError error in results.Errors)
             {
                 sb.AppendLine(string.Format("Error in {0} : {1}", error.FileName, error.ErrorText));
+                m_NonCompilingScriptFiles.Add(error.FileName.Replace(Application.dataPath, "Assets"));
             }
 
-            Debug.Log(sb);
-        }
-        else
-        {
-            Debug.Log("succesful compiled");
+
+            m_PackageCompileError = sb.ToString();
         }
     }
 }
@@ -264,6 +281,7 @@ public class PackageDesigner : EditorWindow
 public class DependencyTreeView : TreeView
 {
     public AssetPackage assetPackage = null;
+    public PackageDesigner designer = null;
     public GUIContent[] assetPreviews = null;
 
 
@@ -326,7 +344,6 @@ public class DependencyTreeView : TreeView
 
             itm.displayName = value;
             itm.fullAssetPath = fullPath;
-
             Object obj = AssetDatabase.LoadAssetAtPath(fullPath, typeof(UnityEngine.Object));
             itm.icon = AssetPreview.GetMiniThumbnail(obj);
 
@@ -402,6 +419,25 @@ public class DependencyTreeView : TreeView
                 RecursiveDelete(item.children[j], ref haveDelete);
             }
         }
+    }
+
+    protected override void RowGUI(RowGUIArgs args)
+    {
+        GUI.color = Color.white;
+
+        if (args.item.hasChildren == false)
+        {
+            AssetTreeViewItem itm = args.item as AssetTreeViewItem;
+            if (itm != null)
+            {
+                if(designer.nonCompilingFiles.Contains(itm.fullAssetPath))
+                {
+                    GUI.color = Color.red;
+                }
+            }
+        }
+
+        base.RowGUI(args);
     }
 
     public DependencyTreeView(TreeViewState state) : base(state)
