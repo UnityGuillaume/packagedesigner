@@ -23,6 +23,11 @@ public class PackageDesigner : EditorWindow
         GetWindow<PackageDesigner>();
     }
 
+    private void OnFocus()
+    {
+        PopulateTreeview();
+    }
+
     private void OnEnable()
     {
         GetAllPackageList();
@@ -165,8 +170,8 @@ public class PackageDesigner : EditorWindow
     void GetAllAssetsDependency(Object[] objs)
     {
         Undo.RecordObject(m_CurrentlyEdited, "Dependencies added");
-        if(m_CurrentlyEdited.dependencies == null)
-            m_CurrentlyEdited.dependencies = new string[0];
+        if(m_CurrentlyEdited.dependenciesID == null)
+            m_CurrentlyEdited.dependenciesID = new string[0];
 
         for(int i = 0; i < objs.Length; ++i)
         {
@@ -174,9 +179,10 @@ public class PackageDesigner : EditorWindow
 
             for (int j = 0; j < str.Length; ++j)
             {
-                if (!ArrayUtility.Contains(m_CurrentlyEdited.dependencies, str[j]))
+                string depID = AssetDatabase.AssetPathToGUID(str[j]);
+                if (!ArrayUtility.Contains(m_CurrentlyEdited.dependenciesID, depID))
                 {
-                    ArrayUtility.Add(ref m_CurrentlyEdited.dependencies, str[j]);
+                    ArrayUtility.Add(ref m_CurrentlyEdited.dependenciesID, depID);
                 }
             }
         }
@@ -193,11 +199,12 @@ public class PackageDesigner : EditorWindow
         m_DepTreeView.ExpandAll();
 
         string[] files = new string[0];
-        for(int i = 0; i < m_CurrentlyEdited.dependencies.Length; ++i)
+        string[] depPath = m_CurrentlyEdited.dependencies;
+        for (int i = 0; i < depPath.Length; ++i)
         {
-            if(AssetDatabase.GetMainAssetTypeAtPath(m_CurrentlyEdited.dependencies[i]) == typeof(MonoScript))
+            if(AssetDatabase.GetMainAssetTypeAtPath(depPath[i]) == typeof(MonoScript))
             {
-                ArrayUtility.Add(ref files, m_CurrentlyEdited.dependencies[i].Replace("Assets", Application.dataPath));
+                ArrayUtility.Add(ref files, depPath[i].Replace("Assets", Application.dataPath));
             }
         }
 
@@ -267,16 +274,17 @@ public class DependencyTreeView : TreeView
     {
         TreeViewItem item = new TreeViewItem();
         item.depth = -1;
-        if (assetPackage == null || assetPackage.dependencies == null || assetPackage.dependencies.Length == 0)
+        if (assetPackage == null || assetPackage.dependenciesID == null || assetPackage.dependenciesID.Length == 0)
         {
             TreeViewItem itm = new TreeViewItem(freeID, 0, "Nothing");
             item.AddChild(itm);
             return item;
         }
 
-        for(int i = 0; i < assetPackage.dependencies.Length; ++i)
+        for(int i = 0; i < assetPackage.dependenciesID.Length; ++i)
         {
-            RecursiveAdd(item, assetPackage.dependencies[i], assetPackage.dependencies[i]);
+            string path = AssetDatabase.GUIDToAssetPath(assetPackage.dependenciesID[i]);
+            RecursiveAdd(item, path, path);
         }
 
         SetupDepthsFromParentsAndChildren(item);
@@ -383,7 +391,8 @@ public class DependencyTreeView : TreeView
                     haveDelete = true;
                 }
 
-                ArrayUtility.Remove(ref assetPackage.dependencies, itm.fullAssetPath);
+                string guid = AssetDatabase.AssetPathToGUID(itm.fullAssetPath);
+                ArrayUtility.Remove(ref assetPackage.dependenciesID, guid);
             }
         }
         else
