@@ -16,8 +16,11 @@ public class PackageDesigner : EditorWindow
 
     AssetPackage m_CurrentlyEdited = null;
 
-    DependencyTreeView m_DepTreeView;
+    DependencyTreeView m_AssetPreviewTree;
     TreeViewState m_tvstate;
+
+    DependencyTreeView m_ReorgTreeView;
+    TreeViewState m_reorgstate;
 
     string m_PackageCompileError;
     List<string> m_NonCompilingScriptFiles = new List<string>();
@@ -37,9 +40,16 @@ public class PackageDesigner : EditorWindow
     private void OnEnable()
     {
         GetAllPackageList();
+
         m_tvstate = new TreeViewState();
-        m_DepTreeView = new DependencyTreeView(m_tvstate);
-        m_DepTreeView.designer = this;
+        m_AssetPreviewTree = new DependencyTreeView(m_tvstate);
+        m_AssetPreviewTree.designer = this;
+        m_AssetPreviewTree.isPreview = true;
+
+        m_reorgstate = new TreeViewState();
+        m_ReorgTreeView = new DependencyTreeView(m_reorgstate);
+        m_ReorgTreeView.designer = this;
+        m_ReorgTreeView.isPreview = false;
 
         Undo.undoRedoPerformed += UndoPerformed;
 
@@ -147,31 +157,49 @@ public class PackageDesigner : EditorWindow
 
         EditorGUILayout.EndVertical();
 
-        EditorGUILayout.BeginVertical();
-        GUILayout.FlexibleSpace();
+        //EditorGUILayout.BeginVertical();
+        //GUILayout.FlexibleSpace();
+        //EditorGUILayout.EndVertical();
+
+        //if (Event.current.type == EventType.DragUpdated)
+        //{
+        //    Rect rect = GUILayoutUtility.GetLastRect();
+        //    DragAndDrop.visualMode = rect.Contains(Event.current.mousePosition) ? DragAndDropVisualMode.Move : DragAndDropVisualMode.Rejected;
+        //}
+        //else if (Event.current.type == EventType.DragPerform)
+        //{
+        //    GetAllAssetsDependency(DragAndDrop.objectReferences);
+        //}
+
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.BeginVertical("box");
+
+        EditorGUILayout.LabelField("ASSETS LIST", GUILayout.ExpandHeight(true));
+        
         EditorGUILayout.EndVertical();
-
-        if (Event.current.type == EventType.DragUpdated)
-        {
-            Rect rect = GUILayoutUtility.GetLastRect();
-            DragAndDrop.visualMode = rect.Contains(Event.current.mousePosition) ? DragAndDropVisualMode.Move : DragAndDropVisualMode.Rejected;
-        }
-        else if (Event.current.type == EventType.DragPerform)
-        {
-            GetAllAssetsDependency(DragAndDrop.objectReferences);
-        }
-
         Rect r = GUILayoutUtility.GetLastRect();
-        m_DepTreeView.OnGUI(r);
+        r.y += EditorGUIUtility.singleLineHeight;
+        r.height -= EditorGUIUtility.singleLineHeight * 1.5f;
+        m_AssetPreviewTree.OnGUI(r);
 
-        if (m_DepTreeView.assetPreviews != null && m_DepTreeView.assetPreviews.Length > 0)
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("OUTPUT", GUILayout.ExpandHeight(true));
+        EditorGUILayout.EndVertical();
+        r = GUILayoutUtility.GetLastRect();
+        r.y += EditorGUIUtility.singleLineHeight;
+        r.height -= EditorGUIUtility.singleLineHeight * 1.5f;
+        m_ReorgTreeView.OnGUI(r);
+
+        EditorGUILayout.EndHorizontal();
+
+        if (m_AssetPreviewTree.assetPreviews != null && m_AssetPreviewTree.assetPreviews.Length > 0)
         {
             EditorGUILayout.BeginHorizontal("box", GUILayout.Height(128.0f));
-            if (m_DepTreeView.assetPreviews != null)
+            if (m_AssetPreviewTree.assetPreviews != null)
             {
-                for (int i = 0; i < m_DepTreeView.assetPreviews.Length; ++i)
+                for (int i = 0; i < m_AssetPreviewTree.assetPreviews.Length; ++i)
                 {
-                    EditorGUILayout.LabelField(m_DepTreeView.assetPreviews[i], GUILayout.Height(128.0f));
+                    EditorGUILayout.LabelField(m_AssetPreviewTree.assetPreviews[i], GUILayout.Height(128.0f));
                 }
             }
             GUILayout.FlexibleSpace();
@@ -197,13 +225,14 @@ public class PackageDesigner : EditorWindow
                 if (!ArrayUtility.Contains(m_CurrentlyEdited.dependenciesID, depID))
                 {
                     ArrayUtility.Add(ref m_CurrentlyEdited.dependenciesID, depID);
+                    ArrayUtility.Add(ref m_CurrentlyEdited.outputPath, AssetDatabase.GUIDToAssetPath(depID));
                 }
             }
         }
         PopulateTreeview();
     }
 
-    void PopulateTreeview()
+    public void PopulateTreeview()
     {
         m_PackageCompileError = "";
         m_ErroDisplayScroll = Vector2.zero;
@@ -227,9 +256,13 @@ public class PackageDesigner : EditorWindow
         }
 
 
-        m_DepTreeView.assetPackage = m_CurrentlyEdited;
-        m_DepTreeView.Reload();
-        m_DepTreeView.ExpandAll();
+        m_AssetPreviewTree.assetPackage = m_CurrentlyEdited;
+        m_AssetPreviewTree.Reload();
+        m_AssetPreviewTree.ExpandAll();
+
+        m_ReorgTreeView.assetPackage = m_CurrentlyEdited;
+        m_ReorgTreeView.Reload();
+        m_ReorgTreeView.ExpandAll();
     }
 
     void GetAllPackageList()
@@ -284,14 +317,27 @@ public class DependencyTreeView : TreeView
     public PackageDesigner designer = null;
     public GUIContent[] assetPreviews = null;
 
+    //preview tree just list asset inside the package, they allow deleting stuff (remove from package).
+    //non preview tree are the one use to reorganize the assets. they don't allow deleting, but allow creating empty folder/move things around
+    public bool isPreview = false;
 
+    protected Texture2D m_FolderIcone;
     //TODO replace that with proper id handling, reusing etc. For now simple increment will be enough
     protected int freeID = 0;
+
+    protected GenericMenu m_contextMenu;
+
+    public DependencyTreeView(TreeViewState state) : base(state)
+    {
+        m_FolderIcone = EditorGUIUtility.Load("Folder Icon.asset") as Texture2D;
+        freeID = 0;
+    }
 
     protected override TreeViewItem BuildRoot()
     {
         TreeViewItem item = new TreeViewItem();
         item.depth = -1;
+
         if (assetPackage == null || assetPackage.dependenciesID == null || assetPackage.dependenciesID.Length == 0)
         {
             TreeViewItem itm = new TreeViewItem(freeID, 0, "Nothing");
@@ -301,8 +347,17 @@ public class DependencyTreeView : TreeView
 
         for(int i = 0; i < assetPackage.dependenciesID.Length; ++i)
         {
-            string path = AssetDatabase.GUIDToAssetPath(assetPackage.dependenciesID[i]);
-            RecursiveAdd(item, path, path);
+            string path, assetpath;
+
+            assetpath = AssetDatabase.GUIDToAssetPath(assetPackage.dependenciesID[i]);
+            if (isPreview)
+            {
+                path = assetpath;
+            }
+            else
+                path = assetPackage.outputPath[i];
+
+            RecursiveAdd(item, path, assetpath);
         }
 
         SetupDepthsFromParentsAndChildren(item);
@@ -334,6 +389,7 @@ public class DependencyTreeView : TreeView
             TreeViewItem itm = new TreeViewItem(freeID);
             freeID += 1;
             itm.displayName = node;
+            itm.icon = m_FolderIcone;
             root.AddChild(itm);
             RecursiveAdd(itm, childValue, fullPath);
         }
@@ -373,6 +429,36 @@ public class DependencyTreeView : TreeView
         }
     }
 
+    protected override void ContextClickedItem(int id)
+    {
+        base.ContextClickedItem(id);
+
+        if (isPreview)
+            return;//preview tree have no context click
+
+        TreeViewItem itm = FindItem(id, rootItem);
+
+        if (itm is AssetTreeViewItem)
+            return; //we can only context click folder, not assets
+
+        m_contextMenu = new GenericMenu();
+        m_contextMenu.AddItem(new GUIContent("New Folder"), false, CreateFolderContext, itm);
+        m_contextMenu.ShowAsContext();
+    }
+
+    protected void CreateFolderContext(object item)
+    {
+        TreeViewItem root = item as TreeViewItem;
+        TreeViewItem itm = new TreeViewItem(freeID);
+        freeID += 1;
+        itm.displayName = "Folder";
+        itm.icon = m_FolderIcone;
+        root.AddChild(itm);
+
+        SetupDepthsFromParentsAndChildren(root);
+        SetExpanded(itm.id, true);
+    }
+
     protected override void CommandEventHandling()
     {
         base.CommandEventHandling();
@@ -390,8 +476,7 @@ public class DependencyTreeView : TreeView
 
             if (haveDelete)
             {
-                Reload();
-                ExpandAll();
+                DesignerReloadTrees();
             }
         }
     }
@@ -409,7 +494,13 @@ public class DependencyTreeView : TreeView
                 }
 
                 string guid = AssetDatabase.AssetPathToGUID(itm.fullAssetPath);
-                ArrayUtility.Remove(ref assetPackage.dependenciesID, guid);
+                int idx = ArrayUtility.FindIndex(assetPackage.dependenciesID, x => x == guid);
+
+                if (idx != -1)
+                {
+                    ArrayUtility.RemoveAt(ref assetPackage.dependenciesID, idx);
+                    ArrayUtility.RemoveAt(ref assetPackage.outputPath, idx);
+                }
             }
         }
         else
@@ -440,9 +531,50 @@ public class DependencyTreeView : TreeView
         base.RowGUI(args);
     }
 
-    public DependencyTreeView(TreeViewState state) : base(state)
+    protected override bool CanStartDrag(CanStartDragArgs args)
     {
-        freeID = 0;
+        return !isPreview;
+    }
+
+    protected override void SetupDragAndDrop(SetupDragAndDropArgs args)
+    {
+        base.SetupDragAndDrop(args);
+
+        m_Dragged.Clear();
+        m_Dragged.AddRange(args.draggedItemIDs);
+
+        DragAndDrop.PrepareStartDrag();
+        DragAndDrop.StartDrag("Item view");
+        //DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+    }
+
+    List<int> m_Dragged = new List<int>();
+    protected override DragAndDropVisualMode HandleDragAndDrop(DragAndDropArgs args)
+    {
+        if (args.dragAndDropPosition == DragAndDropPosition.OutsideItems)
+            return DragAndDropVisualMode.Rejected;
+
+        if(args.performDrop)
+        {
+            TreeViewItem item = args.parentItem;
+
+            if (item is AssetTreeViewItem)
+                return DragAndDropVisualMode.Rejected;
+
+            
+            for(int i = 0; i < m_Dragged.Count; ++i)
+            {
+                TreeViewItem itm = FindItem(m_Dragged[i], rootItem);
+                //itm.
+            }
+        }
+
+        return DragAndDropVisualMode.Move;
+    }
+
+    void DesignerReloadTrees()
+    {
+        designer.PopulateTreeview();
     }
 }
 

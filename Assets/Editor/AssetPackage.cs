@@ -7,6 +7,8 @@ public class AssetPackage : ScriptableObject
 {
     public string packageName = "Package";
     public string[] dependenciesID = new string[0];
+    public string[] outputPath = new string[0];
+
 
     //This is costly and create garbage, but it is also easy, so call with parcimony
     public string[] dependencies
