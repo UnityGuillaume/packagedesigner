@@ -10,6 +10,7 @@ using System.Text;
 public class PackageDesigner : EditorWindow
 {
     public List<string> nonCompilingFiles { get { return m_NonCompilingScriptFiles; } }
+    public AssetPackage currentlyEdited {  get { return m_CurrentlyEdited; } }
 
     AssetPackage[] m_AssetPackageList;
     Vector2 m_PackageListScrollPos;
@@ -209,7 +210,7 @@ public class PackageDesigner : EditorWindow
         EditorGUILayout.EndVertical();
     }
 
-    void GetAllAssetsDependency(Object[] objs)
+    public void GetAllAssetsDependency(Object[] objs)
     {
         Undo.RecordObject(m_CurrentlyEdited, "Dependencies added");
         if(m_CurrentlyEdited.dependenciesID == null)
@@ -357,14 +358,14 @@ public class DependencyTreeView : TreeView
             else
                 path = assetPackage.outputPath[i];
 
-            RecursiveAdd(item, path, assetpath);
+            RecursiveAdd(item, path, assetpath, i);
         }
 
         SetupDepthsFromParentsAndChildren(item);
         return item;
     }
 
-    void RecursiveAdd(TreeViewItem root, string value, string fullPath)
+    void RecursiveAdd(TreeViewItem root, string value, string fullPath, int dependencyIdx)
     {
         int idx = value.IndexOf('/');
 
@@ -379,7 +380,7 @@ public class DependencyTreeView : TreeView
                 {
                     if (root.children[i].displayName == node)
                     {
-                        RecursiveAdd(root.children[i], childValue, fullPath);
+                        RecursiveAdd(root.children[i], childValue, fullPath, dependencyIdx);
                         return;
                     }
                 }
@@ -391,7 +392,7 @@ public class DependencyTreeView : TreeView
             itm.displayName = node;
             itm.icon = m_FolderIcone;
             root.AddChild(itm);
-            RecursiveAdd(itm, childValue, fullPath);
+            RecursiveAdd(itm, childValue, fullPath, dependencyIdx);
         }
         else
         {//this is a leaf node, just create a new one and add it to the root
@@ -400,6 +401,7 @@ public class DependencyTreeView : TreeView
 
             itm.displayName = value;
             itm.fullAssetPath = fullPath;
+            itm.dependencyIdx = dependencyIdx;
             Object obj = AssetDatabase.LoadAssetAtPath(fullPath, typeof(UnityEngine.Object));
             itm.icon = AssetPreview.GetMiniThumbnail(obj);
 
@@ -543,6 +545,7 @@ public class DependencyTreeView : TreeView
         m_Dragged.Clear();
         m_Dragged.AddRange(args.draggedItemIDs);
 
+        DragAndDrop.objectReferences = new Object[0];
         DragAndDrop.PrepareStartDrag();
         DragAndDrop.StartDrag("Item view");
         //DragAndDrop.visualMode = DragAndDropVisualMode.Move;
@@ -556,20 +559,78 @@ public class DependencyTreeView : TreeView
 
         if(args.performDrop)
         {
-            TreeViewItem item = args.parentItem;
+            if (DragAndDrop.objectReferences.Length > 0)
+            {//this is dropping asset into tree
+                if (!isPreview)
+                    return DragAndDropVisualMode.Rejected; //can only drop asset in the file list, not the folder structure
 
-            if (item is AssetTreeViewItem)
-                return DragAndDropVisualMode.Rejected;
+                designer.GetAllAssetsDependency(DragAndDrop.objectReferences);
+            }
+            else
+            {//this is dropping item from tree
+                TreeViewItem dropTarget = args.parentItem;
 
-            
-            for(int i = 0; i < m_Dragged.Count; ++i)
-            {
-                TreeViewItem itm = FindItem(m_Dragged[i], rootItem);
-                //itm.
+                if (dropTarget is AssetTreeViewItem)
+                    return DragAndDropVisualMode.Rejected;
+
+
+                for (int i = 0; i < m_Dragged.Count; ++i)
+                {
+                    TreeViewItem itm = FindItem(m_Dragged[i], rootItem);
+                    AssetTreeViewItem assetItem = itm as AssetTreeViewItem;
+
+                    if (assetItem != null)
+                    {
+                        string filename = System.IO.Path.GetFileName(assetItem.fullAssetPath);
+                        string newFilename = GetFullPath(dropTarget) + "/" + filename;
+
+                        designer.currentlyEdited.outputPath[assetItem.dependencyIdx] = newFilename;
+                    }
+                    else
+                    {
+                        string originPath = GetFullPath(itm.parent);
+                        string targetPath = GetFullPath(dropTarget);
+
+                        for (int j = 0; j < itm.children.Count; ++j)
+                        {
+                            ReparentAssets(itm.children[j], originPath, targetPath);
+                        }
+
+                    }
+                }
+
+                designer.PopulateTreeview();
             }
         }
 
         return DragAndDropVisualMode.Move;
+    }
+
+    string GetFullPath(TreeViewItem item)
+    {
+        if (item.parent == null || item.parent == rootItem)
+            return item.displayName;
+
+        return GetFullPath(item.parent) + "/" + item.displayName;
+    }
+
+    void ReparentAssets(TreeViewItem item, string rootPath, string newPath)
+    {
+        if (item.hasChildren)
+        {
+            for (int i = 0; i < item.children.Count; ++i)
+                ReparentAssets(item.children[i], rootPath, newPath);
+        }
+        else
+        {
+            AssetTreeViewItem assetTreeItem = item as AssetTreeViewItem;
+            if (assetTreeItem == null)
+                return;
+
+            string path = GetFullPath(assetTreeItem);
+            path = path.Replace(rootPath, newPath);
+            designer.currentlyEdited.outputPath[assetTreeItem.dependencyIdx] = path;
+        }
     }
 
     void DesignerReloadTrees()
@@ -581,6 +642,7 @@ public class DependencyTreeView : TreeView
 public class AssetTreeViewItem : TreeViewItem
 {
     public string fullAssetPath = "";
+    public int dependencyIdx = -1;
 
     public AssetTreeViewItem(int id) : base(id) { }
 }
