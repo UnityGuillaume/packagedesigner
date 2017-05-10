@@ -119,7 +119,43 @@ public class PackageDesigner : EditorWindow
         if(saveTo == "")
             saveTo = EditorUtility.SaveFilePanel("Export package", Application.dataPath.Replace("/Assets", ""), m_CurrentlyEdited.packageName, "unitypackage");
 
-        AssetDatabase.ExportPackage(m_CurrentlyEdited.dependencies, saveTo, ExportPackageOptions.Default);
+        //Still didnt' give a valid path or canceled, exit
+        if (saveTo == "")
+            return;
+
+        //First move all into a temp folder for export
+        string[] oldPathSaved = new string[m_CurrentlyEdited.dependencies.Length];
+        string exportTemp = Application.dataPath + "/" + m_CurrentlyEdited.packageName + "_Export";
+        string movePath = exportTemp.Replace(Application.dataPath, "Assets");
+        System.IO.Directory.CreateDirectory(exportTemp);
+
+        for(int i = 0; i < m_CurrentlyEdited.dependenciesID.Length; ++i)
+        {
+            string destPath = m_CurrentlyEdited.outputPath[i].Replace("Assets", movePath);
+            string directorypath = destPath.Replace("Assets", Application.dataPath);
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(directorypath));     
+        }
+        AssetDatabase.Refresh();
+
+        for (int i = 0; i < m_CurrentlyEdited.dependenciesID.Length; ++i)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(m_CurrentlyEdited.dependenciesID[i]);
+            oldPathSaved[i] = System.IO.Path.GetDirectoryName(path);
+            string destPath = m_CurrentlyEdited.outputPath[i].Replace("Assets", movePath);
+
+            AssetDatabase.MoveAsset(path, destPath);
+        }
+        AssetDatabase.Refresh();
+
+        AssetDatabase.ExportPackage(movePath, saveTo, ExportPackageOptions.Recurse);
+        for (int i = 0; i < oldPathSaved.Length; ++i)
+        {
+            string path = AssetDatabase.GUIDToAssetPath(m_CurrentlyEdited.dependenciesID[i]);
+            AssetDatabase.MoveAsset(path, oldPathSaved[i]);
+        }
+        AssetDatabase.Refresh();
+
+        System.IO.Directory.Delete(exportTemp, true);
     }
 
     void ExportAll()
@@ -157,20 +193,6 @@ public class PackageDesigner : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         EditorGUILayout.EndVertical();
-
-        //EditorGUILayout.BeginVertical();
-        //GUILayout.FlexibleSpace();
-        //EditorGUILayout.EndVertical();
-
-        //if (Event.current.type == EventType.DragUpdated)
-        //{
-        //    Rect rect = GUILayoutUtility.GetLastRect();
-        //    DragAndDrop.visualMode = rect.Contains(Event.current.mousePosition) ? DragAndDropVisualMode.Move : DragAndDropVisualMode.Rejected;
-        //}
-        //else if (Event.current.type == EventType.DragPerform)
-        //{
-        //    GetAllAssetsDependency(DragAndDrop.objectReferences);
-        //}
 
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.BeginVertical("box");
@@ -533,6 +555,27 @@ public class DependencyTreeView : TreeView
         base.RowGUI(args);
     }
 
+    //protected override 
+
+    protected override bool CanRename(TreeViewItem item)
+    {
+        if (item is AssetTreeViewItem)
+            return false;
+
+        return true;
+    }
+
+    protected override void RenameEnded(RenameEndedArgs args)
+    {
+        TreeViewItem item = FindItem(args.itemID, rootItem);
+
+        item.displayName = args.newName;
+
+        TriggerRename(item);
+
+        args.acceptedRename = true;
+    }
+
     protected override bool CanStartDrag(CanStartDragArgs args)
     {
         return !isPreview;
@@ -612,6 +655,26 @@ public class DependencyTreeView : TreeView
             return item.displayName;
 
         return GetFullPath(item.parent) + "/" + item.displayName;
+    }
+
+    //this is to reimplify rename, it's easier to descend to each children and set their output path to the GetFullPath...
+    void TriggerRename(TreeViewItem item)
+    {
+        if(item.hasChildren)
+        {
+            for (int i = 0; i < item.children.Count; ++i)
+                TriggerRename(item.children[i]);
+        }
+        else
+        {
+            AssetTreeViewItem assetItem = item as AssetTreeViewItem;
+            if(assetItem != null)
+            {
+                string p = GetFullPath(item);
+
+                designer.currentlyEdited.outputPath[assetItem.dependencyIdx] = p;
+            }
+        }
     }
 
     void ReparentAssets(TreeViewItem item, string rootPath, string newPath)
