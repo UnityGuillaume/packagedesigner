@@ -125,6 +125,7 @@ public class PackageDesigner : EditorWindow
 
         //First move all into a temp folder for export
         string[] oldPathSaved = new string[m_CurrentlyEdited.dependencies.Length];
+        string[] newPathSaved = new string[m_CurrentlyEdited.dependencies.Length];
         string exportTemp = Application.dataPath + "/" + m_CurrentlyEdited.packageName + "_Export";
         string movePath = exportTemp.Replace(Application.dataPath, "Assets");
         System.IO.Directory.CreateDirectory(exportTemp);
@@ -140,22 +141,23 @@ public class PackageDesigner : EditorWindow
         for (int i = 0; i < m_CurrentlyEdited.dependenciesID.Length; ++i)
         {
             string path = AssetDatabase.GUIDToAssetPath(m_CurrentlyEdited.dependenciesID[i]);
-            oldPathSaved[i] = System.IO.Path.GetDirectoryName(path);
+            oldPathSaved[i] = path;
             string destPath = m_CurrentlyEdited.outputPath[i].Replace("Assets", movePath);
+            newPathSaved[i] = destPath;
 
             AssetDatabase.MoveAsset(path, destPath);
         }
         AssetDatabase.Refresh();
 
         AssetDatabase.ExportPackage(movePath, saveTo, ExportPackageOptions.Recurse);
+
         for (int i = 0; i < oldPathSaved.Length; ++i)
         {
-            string path = AssetDatabase.GUIDToAssetPath(m_CurrentlyEdited.dependenciesID[i]);
-            AssetDatabase.MoveAsset(path, oldPathSaved[i]);
+            AssetDatabase.MoveAsset(newPathSaved[i], oldPathSaved[i]);
         }
-        AssetDatabase.Refresh();
 
-        System.IO.Directory.Delete(exportTemp, true);
+        FileUtil.DeleteFileOrDirectory(exportTemp);
+        AssetDatabase.Refresh();
     }
 
     void ExportAll()
@@ -170,6 +172,8 @@ public class PackageDesigner : EditorWindow
             m_CurrentlyEdited = m_AssetPackageList[i];
             ExportCurrentPackage(saveFolder + "/" + m_CurrentlyEdited.packageName + ".unitypackage");
         }
+        m_CurrentlyEdited = current;
+
     }
 
     void EditedUI()
@@ -185,7 +189,14 @@ public class PackageDesigner : EditorWindow
         }
 
         EditorGUILayout.BeginHorizontal();
-        m_CurrentlyEdited.packageName = EditorGUILayout.DelayedTextField("Package Name", m_CurrentlyEdited.packageName);
+        string packageName = EditorGUILayout.DelayedTextField("Package Name", m_CurrentlyEdited.packageName);
+        if(packageName != m_CurrentlyEdited.packageName)
+        {
+            Undo.RecordObject(m_CurrentlyEdited, "Renamed package");
+            m_CurrentlyEdited.packageName = packageName;
+        }
+
+
         if(GUILayout.Button("Export ..."))
         {
             ExportCurrentPackage();
@@ -252,6 +263,9 @@ public class PackageDesigner : EditorWindow
                 }
             }
         }
+
+        EditorUtility.SetDirty(m_CurrentlyEdited);
+
         PopulateTreeview();
     }
 
@@ -525,6 +539,8 @@ public class DependencyTreeView : TreeView
                     ArrayUtility.RemoveAt(ref assetPackage.dependenciesID, idx);
                     ArrayUtility.RemoveAt(ref assetPackage.outputPath, idx);
                 }
+
+                EditorUtility.SetDirty(assetPackage);
             }
         }
         else
